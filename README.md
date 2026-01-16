@@ -39,7 +39,7 @@ This tool generates Windows x86 shellcode that uses advanced evasion techniques 
   - Stack frame setup
   - Register preservation
   - Error handling labels (optional)
-- **Clean Output Format**: Generates Python code with array-based shellcode format
+
 
 ## Installation
 
