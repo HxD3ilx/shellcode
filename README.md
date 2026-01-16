@@ -336,9 +336,6 @@ This is a specialized security tool. Contributions should:
 - Include comprehensive documentation
 - Follow existing code style
 
-## License
-
-This tool is provided for educational purposes. Users are responsible for ensuring legal and ethical use.
 
 ## References
 
